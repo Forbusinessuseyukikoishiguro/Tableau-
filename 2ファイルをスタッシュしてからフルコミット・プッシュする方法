@@ -1,0 +1,330 @@
+2ファイルをスタッシュしてからフルコミット・プッシュする方法ですね！
+
+## 1. 基本的な2ファイルスタッシュ方法
+
+### 特定の2ファイルのみスタッシュ
+```bash
+# 2ファイルを指定してスタッシュ
+git stash push -m "個人設定保存" vue.config.js .env.local
+
+# 残りの変更をフルコミット
+git add .
+git commit -m "機能追加: 新しい機能実装"
+git push origin develop
+
+# 作業後に個人設定を復元
+git stash pop
+```
+
+### パッチ形式でのスタッシュ（対話的）
+```bash
+# 対話的に2ファイルをスタッシュ
+git stash push -p -m "個人設定のみ保存"
+# → vue.config.jsとlocalファイルのみyで選択
+
+# フルコミット
+git add .
+git commit -m "フル機能実装"
+git push origin develop
+
+# 復元
+git stash pop
+```
+
+## 2. VSCodeでの2ファイルスタッシュ
+
+### .vscode/tasks.json（スタッシュ専用）
+```json
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Git: Stash 2 Config Files",
+      "type": "shell",
+      "command": "git",
+      "args": [
+        "stash", "push", "-m", "個人設定ファイル保存", 
+        "vue.config.js", ".env.local"
+      ],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "Git: Full Commit & Push",
+      "type": "shell",
+      "command": "sh",
+      "args": [
+        "-c",
+        "git add . && git status && read -p 'コミットメッセージ: ' msg && git commit -m \"$msg\" && git push origin develop"
+      ],
+      "group": "build",
+      "dependsOrder": "sequence",
+      "dependsOn": "Git: Stash 2 Config Files"
+    },
+    {
+      "label": "Git: Restore Config Files",
+      "type": "shell",
+      "command": "git",
+      "args": ["stash", "pop"],
+      "group": "build"
+    },
+    {
+      "label": "Git: Full Workflow (Stash → Commit → Restore)",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "Git: Stash 2 Config Files",
+        "Git: Full Commit & Push", 
+        "Git: Restore Config Files"
+      ]
+    }
+  ]
+}
+```
+
+### 実行方法
+```
+Ctrl + Shift + P → タスク実行 → "Git: Full Workflow"
+```
+
+## 3. npm scriptsでの自動化
+
+### package.json
+```json
+{
+  "scripts": {
+    "git:stash-configs": "git stash push -m '個人設定保存' vue.config.js .env.local",
+    "git:full-commit": "git add . && git status",
+    "git:restore-configs": "git stash pop",
+    "git:full-workflow": "npm run git:stash-configs && npm run git:full-commit",
+    "dev:commit": "npm run git:stash-configs && echo '設定ファイルをスタッシュしました。コミットを続行してください。'"
+  }
+}
+```
+
+### 使用例
+```bash
+# 1. 設定ファイルをスタッシュ
+npm run git:stash-configs
+
+# 2. フルコミット
+git add .
+git commit -m "新機能実装"
+git push origin develop
+
+# 3. 設定ファイル復元
+npm run git:restore-configs
+```
+
+## 4. より高度なスタッシュ管理
+
+### 複数スタッシュの管理
+```bash
+# 名前付きスタッシュで管理
+git stash push -m "vue.config.js個人設定" vue.config.js
+git stash push -m ".env.local個人設定" .env.local
+
+# スタッシュ一覧確認
+git stash list
+# stash@{0}: On develop: .env.local個人設定
+# stash@{1}: On develop: vue.config.js個人設定
+
+# フルコミット作業
+git add .
+git commit -m "機能実装"
+git push origin develop
+
+# 特定のスタッシュを復元
+git stash apply stash@{1}  # vue.config.js
+git stash apply stash@{0}  # .env.local
+
+# スタッシュクリア
+git stash drop stash@{0}
+git stash drop stash@{1}
+```
+
+### スタッシュ内容の確認
+```bash
+# スタッシュの詳細確認
+git stash show -p stash@{0}
+
+# 特定ファイルのみ確認
+git stash show -p stash@{0} -- vue.config.js
+```
+
+## 5. 自動化スクリプト
+
+### stash-and-commit.sh
+```bash
+#!/bin/bash
+
+echo "🔄 2ファイルスタッシュ & フルコミット開始"
+
+# 1. 現在の状況確認
+echo "📋 現在のgit状況:"
+git status --short
+
+# 2. 2ファイルをスタッシュ
+echo "💾 個人設定ファイルをスタッシュ中..."
+git stash push -m "個人設定保存_$(date +%Y%m%d_%H%M%S)" vue.config.js .env.local
+
+if [ $? -eq 0 ]; then
+    echo "✅ スタッシュ完了"
+else
+    echo "❌ スタッシュ失敗"
+    exit 1
+fi
+
+# 3. 残りの変更確認
+echo "📋 コミット対象ファイル:"
+git status --short
+
+# 4. コミットメッセージ入力
+read -p "📝 コミットメッセージを入力: " commit_message
+
+if [ -z "$commit_message" ]; then
+    commit_message="フル機能更新_$(date +%Y%m%d_%H%M%S)"
+fi
+
+# 5. フルコミット
+echo "🚀 フルコミット実行中..."
+git add .
+git commit -m "$commit_message"
+
+if [ $? -eq 0 ]; then
+    echo "✅ コミット完了"
+    
+    # 6. プッシュ確認
+    read -p "🌐 developブランチにプッシュしますか？ (y/n): " push_confirm
+    
+    if [ "$push_confirm" = "y" ] || [ "$push_confirm" = "Y" ]; then
+        git push origin develop
+        echo "✅ プッシュ完了"
+    fi
+else
+    echo "❌ コミット失敗"
+    exit 1
+fi
+
+# 7. スタッシュ復元確認
+read -p "🔄 個人設定ファイルを復元しますか？ (y/n): " restore_confirm
+
+if [ "$restore_confirm" = "y" ] || [ "$restore_confirm" = "Y" ]; then
+    git stash pop
+    echo "✅ 個人設定復元完了"
+    echo "📋 復元後の状況:"
+    git status --short
+fi
+
+echo "🎉 ワークフロー完了！"
+```
+
+### 実行権限付与と使用
+```bash
+chmod +x stash-and-commit.sh
+./stash-and-commit.sh
+```
+
+## 6. Git Hooks活用（自動スタッシュ）
+
+### .git/hooks/pre-commit
+```bash
+#!/bin/bash
+
+# コミット前に自動で2ファイルをチェック
+if git diff --cached --name-only | grep -q "vue.config.js\|\.env\.local"; then
+    echo "⚠️  個人設定ファイルがコミットに含まれています"
+    echo "🔄 自動でスタッシュしますか？ (y/n)"
+    read -r response
+    
+    if [ "$response" = "y" ]; then
+        # キャッシュから除外
+        git reset HEAD vue.config.js .env.local 2>/dev/null
+        # スタッシュに保存
+        git stash push -m "自動保存_$(date +%Y%m%d_%H%M%S)" vue.config.js .env.local 2>/dev/null
+        echo "✅ 個人設定ファイルをスタッシュしました"
+    else
+        echo "❌ コミット中止"
+        exit 1
+    fi
+fi
+```
+
+### 権限設定
+```bash
+chmod +x .git/hooks/pre-commit
+```
+
+## 7. VSCodeでのワンクリック操作
+
+### settings.json
+```json
+{
+  "git.enableSmartCommit": true,
+  "git.confirmSync": false,
+  "terminal.integrated.profiles.linux": {
+    "stash-commit": {
+      "path": "/bin/bash",
+      "args": ["-c", "./stash-and-commit.sh"]
+    }
+  }
+}
+```
+
+### キーボードショートカット
+```json
+// keybindings.json
+[
+  {
+    "key": "ctrl+shift+alt+s",
+    "command": "workbench.action.terminal.sendSequence",
+    "args": {
+      "text": "./stash-and-commit.sh\n"
+    }
+  }
+]
+```
+
+## 8. トラブルシューティング
+
+### スタッシュが失敗する場合
+```bash
+# ファイルが存在するか確認
+ls -la vue.config.js .env.local
+
+# 変更があるか確認
+git diff vue.config.js .env.local
+
+# 強制スタッシュ
+git stash push -u -m "強制保存" vue.config.js .env.local
+```
+
+### スタッシュ復元でコンフリクト
+```bash
+# コンフリクト確認
+git status
+
+# 手動マージ
+git mergetool
+
+# または現在の変更を保持
+git checkout --theirs vue.config.js
+git checkout --theirs .env.local
+```
+
+### スタッシュリスト管理
+```bash
+# 古いスタッシュクリア
+git stash clear
+
+# 特定期間以上前のスタッシュ削除
+git for-each-ref --format="%(refname:short) %(committerdate)" refs/stash | 
+awk '$2 < "'$(date -d '7 days ago' '+%Y-%m-%d')'"' | 
+cut -d' ' -f1 | xargs -r git update-ref -d
+```
+
+この方法で、個人設定の2ファイルを安全にスタッシュしながら、残りの変更をフルコミット・プッシュできます！
+
+どの方法が一番使いやすそうか教えてください。
