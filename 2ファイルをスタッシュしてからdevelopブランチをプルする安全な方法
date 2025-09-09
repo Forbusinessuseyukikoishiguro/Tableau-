@@ -1,0 +1,341 @@
+2ファイルをスタッシュしてからdevelopブランチをプルする安全な方法
+2ファイルをスタッシュしてからdevelopブランチをプルする安全な方法を説明します！
+
+## 1. 基本的な流れ
+
+### 標準的な手順
+```bash
+# 1. 個人設定の2ファイルをスタッシュ
+git stash push -m "個人設定保存" vue.config.js .env.local
+
+# 2. developブランチの最新を取得
+git pull origin develop
+
+# 3. 個人設定を復元
+git stash pop
+```
+
+## 2. コンフリクト対策付きプル
+
+### 安全なプル手順
+```bash
+# 1. 現在の状況確認
+git status
+
+# 2. 2ファイルをスタッシュ
+git stash push -m "プル前個人設定保存_$(date +%Y%m%d_%H%M%S)" vue.config.js .env.local
+
+# 3. リモート情報更新
+git fetch origin
+
+# 4. developブランチとの差分確認
+git log HEAD..origin/develop --oneline
+
+# 5. プル実行
+git pull origin develop
+
+# 6. コンフリクトチェック
+if [ $? -eq 0 ]; then
+    echo "✅ プル成功"
+    # 個人設定復元
+    git stash pop
+else
+    echo "❌ プル失敗 - 手動解決が必要"
+fi
+```
+
+## 3. VSCodeでの自動化
+
+### .vscode/tasks.json
+```json
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Git: Safe Pull with Stash",
+      "type": "shell",
+      "command": "sh",
+      "args": [
+        "-c",
+        "echo '🔄 安全なプル開始' && git stash push -m 'プル前保存_$(date +%Y%m%d_%H%M%S)' vue.config.js .env.local && echo '💾 個人設定をスタッシュしました' && git pull origin develop && echo '📥 プル完了' && git stash pop && echo '✅ 個人設定を復元しました'"
+      ],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Git: Check Before Pull",
+      "type": "shell", 
+      "command": "sh",
+      "args": [
+        "-c",
+        "echo '📋 現在の状況:' && git status --short && echo '' && echo '🔍 リモートとの差分:' && git fetch origin && git log HEAD..origin/develop --oneline"
+      ],
+      "group": "test"
+    }
+  ]
+}
+```
+
+### 実行方法
+```
+Ctrl + Shift + P → タスク実行 → "Git: Safe Pull with Stash"
+```
+
+## 4. npm scriptsでの管理
+
+### package.json
+```json
+{
+  "scripts": {
+    "git:safe-pull": "git stash push -m '個人設定保存' vue.config.js .env.local && git pull origin develop && git stash pop",
+    "git:check-remote": "git fetch origin && git log HEAD..origin/develop --oneline",
+    "git:stash-pull-restore": "npm run git:stash-configs && git pull origin develop && npm run git:restore-configs",
+    "git:stash-configs": "git stash push -m '個人設定保存' vue.config.js .env.local",
+    "git:restore-configs": "git stash pop",
+    "dev:sync": "npm run git:safe-pull && echo '🎉 同期完了'"
+  }
+}
+```
+
+### 使用方法
+```bash
+# ワンコマンドで安全プル
+npm run git:safe-pull
+
+# または段階的に
+npm run git:check-remote  # まず差分確認
+npm run dev:sync          # 安全プル実行
+```
+
+## 5. 高度なコンフリクト対応スクリプト
+
+### safe-pull.sh
+```bash
+#!/bin/bash
+
+echo "🔄 安全なdevelopブランチプル開始"
+
+# 1. 現在のブランチ確認
+current_branch=$(git branch --show-current)
+if [ "$current_branch" != "develop" ]; then
+    echo "⚠️  現在のブランチ: $current_branch"
+    echo "developブランチに切り替えますか？ (y/n)"
+    read -r switch_confirm
+    if [ "$switch_confirm" = "y" ]; then
+        git checkout develop
+    else
+        echo "❌ 処理を中止します"
+        exit 1
+    fi
+fi
+
+# 2. 未コミットの変更確認
+if ! git diff-index --quiet HEAD --; then
+    echo "📋 未コミットの変更があります:"
+    git status --short
+    
+    # 3. 2ファイルをスタッシュ
+    echo "💾 個人設定ファイルをスタッシュします..."
+    stash_name="プル前保存_$(date +%Y%m%d_%H%M%S)"
+    
+    if git stash push -m "$stash_name" vue.config.js .env.local 2>/dev/null; then
+        echo "✅ スタッシュ完了: $stash_name"
+        stashed=true
+    else
+        echo "⚠️  スタッシュできませんでした（変更なしまたはエラー）"
+        stashed=false
+    fi
+    
+    # 4. 他に未コミット変更があるかチェック
+    if ! git diff-index --quiet HEAD --; then
+        echo "⚠️  他にも未コミットの変更があります:"
+        git status --short
+        echo "これらもスタッシュしますか？ (y/n)"
+        read -r stash_all
+        if [ "$stash_all" = "y" ]; then
+            git stash push -m "その他の変更_$(date +%Y%m%d_%H%M%S)"
+            echo "✅ 全ての変更をスタッシュしました"
+        fi
+    fi
+fi
+
+# 5. リモート情報更新
+echo "🔍 リモート情報を更新中..."
+git fetch origin
+
+# 6. 差分確認
+echo "📊 リモートとの差分:"
+git log HEAD..origin/develop --oneline --max-count=10
+
+if [ $(git rev-list HEAD..origin/develop --count) -eq 0 ]; then
+    echo "✅ 既に最新です"
+    if [ "$stashed" = true ]; then
+        git stash pop
+        echo "✅ 個人設定を復元しました"
+    fi
+    exit 0
+fi
+
+# 7. プル実行
+echo "📥 プル実行中..."
+if git pull origin develop; then
+    echo "✅ プル成功"
+    
+    # 8. スタッシュ復元
+    if [ "$stashed" = true ]; then
+        echo "🔄 個人設定復元中..."
+        if git stash pop; then
+            echo "✅ 個人設定復元完了"
+        else
+            echo "⚠️  復元でコンフリクトが発生しました"
+            echo "📋 コンフリクトファイル:"
+            git status --short | grep "^UU"
+            echo "手動で解決してください"
+        fi
+    fi
+    
+    echo "🎉 安全プル完了"
+else
+    echo "❌ プル失敗"
+    echo "手動で問題を解決してください"
+    exit 1
+fi
+```
+
+### 実行権限と使用
+```bash
+chmod +x safe-pull.sh
+./safe-pull.sh
+```
+
+## 6. コンフリクト解決パターン
+
+### vue.config.jsでコンフリクトした場合
+```bash
+# 1. コンフリクト状況確認
+git status
+
+# 2. 自分の設定を保持（個人設定優先）
+git checkout --ours vue.config.js
+
+# 3. チームの設定を確認してマージ
+git show origin/develop:vue.config.js > vue.config.js.team
+diff vue.config.js vue.config.js.team
+
+# 4. 必要に応じて手動マージ
+nano vue.config.js
+
+# 5. コンフリクト解決完了
+git add vue.config.js
+```
+
+### .env.localでコンフリクトした場合
+```bash
+# 通常は個人設定を優先
+git checkout --ours .env.local
+git add .env.local
+```
+
+## 7. VSCodeでのコンフリクト解決
+
+### settings.json
+```json
+{
+  "git.mergeEditor": true,
+  "diffEditor.ignoreTrimWhitespace": false,
+  "merge-conflict.autoNavigateNextConflict.enabled": true
+}
+```
+
+### コンフリクト時の操作
+1. VSCodeでコンフリクトファイルを開く
+2. `Accept Current Change`（個人設定を保持）
+3. 必要に応じて手動調整
+4. `Ctrl + S`で保存
+
+## 8. 定期同期の自動化
+
+### cron jobでの定期プル
+```bash
+# crontab -e で編集
+# 毎日朝9時に安全プル実行
+0 9 * * * cd /path/to/project && ./safe-pull.sh >> pull.log 2>&1
+```
+
+### GitHub Actions（自動プル通知）
+```yaml
+# .github/workflows/notify-updates.yml
+name: Notify Updates
+
+on:
+  push:
+    branches: [ develop ]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Notify developers
+      run: |
+        echo "developブランチが更新されました"
+        echo "ローカル環境で npm run git:safe-pull を実行してください"
+```
+
+## 9. トラブルシューティング
+
+### スタッシュが失敗する場合
+```bash
+# 変更があるか確認
+git diff vue.config.js .env.local
+
+# ファイルが存在しない場合は作成
+touch vue.config.js .env.local
+
+# 強制スタッシュ
+git stash push -u -m "強制保存" vue.config.js .env.local
+```
+
+### プル後にファイルが消えた場合
+```bash
+# スタッシュリスト確認
+git stash list
+
+# 最新のスタッシュを適用
+git stash apply stash@{0}
+
+# または特定のスタッシュ
+git stash apply "stash@{0}"
+```
+
+### 複数のスタッシュがある場合
+```bash
+# スタッシュ詳細確認
+git stash show -p stash@{0}
+
+# 正しいスタッシュを適用
+git stash apply stash@{1}
+
+# 不要なスタッシュ削除
+git stash drop stash@{0}
+```
+
+## 10. ワンライナーコマンド集
+
+```bash
+# 基本的な安全プル
+alias safe-pull='git stash push -m "個人設定" vue.config.js .env.local && git pull origin develop && git stash pop'
+
+# 確認付き安全プル  
+alias check-pull='git fetch origin && git log HEAD..origin/develop --oneline && safe-pull'
+
+# 緊急時の強制同期
+alias force-sync='git stash && git reset --hard origin/develop && git stash pop'
+```
+
+この方法で、個人設定を保護しながら安全にdevelopブランチの最新変更を取得できます！
+
+何か特定のケースで問題があれば詳しく教えてください。
